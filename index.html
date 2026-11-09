@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>דגבד | חיפוש בתנ״ך</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div class="brand"><h1 title="דוד גד בן דוד">דגבד<span class="dot">.</span></h1></div>
+    <div class="tag" id="tagline"></div>
+    <div class="searchbar">
+      <input id="word" type="search" placeholder="הקלידו מילה…" lang="he" dir="rtl" autocomplete="off">
+      <button class="go" id="go" type="button">חפש</button>
+    </div>
+    <div class="modegrid" id="modegrid"></div>
+    <div class="controls">
+      <label id="skipWrap" hidden>מרחק דילוג <input id="skipD" type="number" min="1" value="102"></label>
+    </div>
+  </div>
+  <div id="results"></div>
+  <div class="foot">הטקסט: ספריא · ניקוד וטעמים מוצגים, החיפוש מתעלם מהם · מילים המחוברות במקף נספרות כמילה אחת · החיפוש רץ על כל התנ״ך בדפדפן</div>
+</div>
+<!-- Load order: data, mode definitions, then the engine and UI. -->
+<script src="tanakh.js"></script>
+<script src="search-modes.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

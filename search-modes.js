@@ -57,7 +57,9 @@ function nikudOk(nword,cons){
    כל מצב הוא רשומה אחת כאן. מוסיפים רשומה לרשימה - והיא מופיעה אוטומטית בכפתורי המצבים באתר, ונכללת גם בהרצת ״כל השיטות״, בלי לגעת בשום מקום אחר.
      name : השם שמוצג בכפתור.
      kind : 'word' - match(w, ctx) רצה על כל מילה בתנ״ך (כל הספרים), ומחזירה true אם יש התאמה.
-            'seq'  - run(bi, input, skip) רצה פעם אחת על כל ספר ומחזירה [{i, span}] (אינדקס מילה ברצף הספר + אורך במילים). מתאים לרצפים כמו ראשי תיבות ודילוגים.
+            'seq'  - run(bi, input, skip, nikud) רצה פעם אחת על כל ספר ומחזירה [{i, span}] (אינדקס מילה ברצף הספר + אורך במילים). מתאים לרצפים כמו ראשי תיבות ודילוגים.
+                   הקלט מועבר בלי רווחים, אלא אם הרשומה מגדירה keepSpaces:true (אז מועבר עם רווחים בין מילים).
+                   nikud - מגבלות הניקוד מהקלט הגולמי (פלט parseNikud, או null כשהקלט לא מנוקד), למצב שרוצה לכבד ניקוד.
      ctx למצב word: {input (הקלט מנורמל), inputG (גימטריה רגילה של הקלט), inputM (גימטריית מילוי),
                      transformed (אם הוגדר transform), before/after (מילים לפני/אחרי, בגודל שהמצב מבקש),
                      loc:{b (ספר), c (פרק), v (פסוק)},
@@ -81,6 +83,26 @@ function nikudOk(nword,cons){
 var MODES=[
  {id:'exact', name:'מילה מדויקת', desc:'קלט מנוקד מתחשב בניקוד (טעמים מופרדים)', kind:'word', usesNikud:true,
   match:function(w,ctx){return w===ctx.input&&nikudOk(ctx.nword,ctx.nikud);}},
+ {id:'phrase', name:'מילים רצופות', desc:'שתי מילים או יותר, זו אחר זו · קלט מנוקד מתחשב בניקוד (טעמים מופרדים)', kind:'seq', keepSpaces:true, usesNikud:true,
+  run:function(bi,input,skip,nikud){
+    var words=input.split(' '),m=words.length,s=streams[bi],res=[];
+    if(m<2)return res;
+    /* מגבלות הניקוד פר מילה: פורסים את מערך הניקוד השטוח של הקלט לפי אורכי המילים.
+       מילה ללא ניקוד בקלט - בלי הגבלה; מילה מנוקדת מחייבת את הסימנים שהוזנו עליה. */
+    var consW=null;
+    if(nikud){
+      consW=[];var off=0;
+      for(var k=0;k<m;k++){var seg=nikud.slice(off,off+words[k].length);off+=words[k].length;consW.push(hasNikudMarks(seg)?seg:null);}
+    }
+    for(var i=0;i+m<=s.w.length;i++){
+      var ok=true;
+      for(var k=0;k<m;k++){
+        if(s.w[i+k]!==words[k]||(consW&&consW[k]&&!nikudOk(s.n[i+k],consW[k]))){ok=false;break;}
+      }
+      if(ok)res.push({i:i,span:m});
+    }
+    return res;
+  }},
  {id:'gem', name:'גימטריה רגילה', desc:'אותיות סופיות נחשבות כרגילות', kind:'word',
   match:function(w,ctx){return w!==ctx.input&&gval(w)===ctx.inputG;}},
  {id:'mil', name:'גימטריה מלאה (מילוי)', desc:'כל אות נכתבת במלואה', kind:'word',
@@ -121,4 +143,3 @@ function acro(words,input,get){
   }
   return res;
 }
-

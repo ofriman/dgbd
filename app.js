@@ -1,19 +1,20 @@
 "use strict";
 
 /* ============ אינדקס התנ״ך בזיכרון ============ */
-/* לכל ספר: streams[b].w = רצף כל המילים (מנורמלות), streams[b].r = אינדקס פסוק לכל מילה.
+/* לכל ספר: streams[b].w = רצף כל המילים (מנורמלות), streams[b].r = אינדקס פסוק לכל מילה,
+   streams[b].n = רצף המילים עם הניקוד שלהן (טעמים מופרדים) להתאמה רגישה לניקוד.
    verseList[b] = רשימת הפסוקים: {t: מילים מנוקדות, w: מילים מנורמלות, c: פרק, v: פסוק, start: מיקום תחילת הפסוק ברצף}. */
 var bookNames=[], streams=[], verseList=[];
 TANAKH.forEach(function(bk,bi){
   bookNames.push(bk.n);
-  var sw=[],sr=[],vl=[];
+  var sw=[],sr=[],sn=[],vl=[];
   bk.c.forEach(function(ch,ci){
     ch.forEach(function(vs,vi){
       vl.push({t:vs.t,w:vs.w,c:ci+1,v:vi+1,start:sw.length});
-      for(var k=0;k<vs.w.length;k++){sw.push(vs.w[k]);sr.push(vl.length-1);}
+      for(var k=0;k<vs.w.length;k++){sw.push(vs.w[k]);sr.push(vl.length-1);sn.push(stripTm(vs.t[k]||vs.w[k]));}
     });
   });
-  streams.push({w:sw,r:sr}); verseList.push(vl);
+  streams.push({w:sw,r:sr,n:sn}); verseList.push(vl);
 });
 /* רצף אותיות לכל ספר (נבנה עצלה) לחיפושי דילוג: letters[b].L אותיות, letters[b].wi אינדקס מילה ברצף */
 var lettersCache=[];
@@ -26,7 +27,11 @@ function lettersOf(bi){
 
 /* ================= תצוגה ================= */
 var input=document.getElementById('word'),results=document.getElementById('results');
-var curMode=MODES[0], shownWords=60, shownOcc=10, curInput='';
+/* "כל השיטות" הוא מצב-על: מריץ את כל הרשומות ב-MODES ומקבץ תוצאות לפי שיטה.
+   הוא לא מחזיק רשימת שיטות משלו - הוא עובר על MODES, ולכן שיטה חדשה נכנסת אליו אוטומטית. */
+var ALL={id:'all', name:'כל השיטות'};
+var SEL=[ALL].concat(MODES); /* כפתורי הבחירה: כל השיטות, ואז כל השיטות מ-MODES */
+var curMode=ALL, curInput='';
 var HN1='אבגדהוזחט',HN2='יכלמנסעפצ',HN3='קרשת';
 function hebNum(n){
   var s='';
@@ -66,29 +71,26 @@ function infoCard(mode,w){
 function syncURL(w,mode){
   try{
     var p='#q='+encodeURIComponent(w)+'&m='+mode.id;
-    if(mode.needsSkip)p+='&d='+(+document.getElementById('skipD').value||1);
+    if(mode.needsSkip||mode===ALL)p+='&d='+(+document.getElementById('skipD').value||1);
     history.replaceState(null,'',p);
   }catch(e){}
 }
-function runSearch(){
-  var w=clean(input.value); curInput=w; shownWords=60; shownOcc=10;
-  document.getElementById('skipWrap').hidden=!curMode.needsSkip;
-  if(w)syncURL(w,curMode);
-  if(!w){document.body.classList.remove('searching');results.innerHTML='';return;}
-  document.body.classList.add('searching');
-  var mode=curMode;
-  var h='<div class="queryline">תוצאות עבור <b>'+esc(w)+'</b> במצב <b>'+esc(mode.name)+'</b></div>';
-  h+=infoCard(mode,w);
+/* מרנדר כרטיס תוצאות של שיטה אחת לתוך box. title - כותרת הכרטיס;
+   showTransform - true כששורת ההמרה (אתב״ש וכד׳) צריכה להופיע בכרטיס עצמו (במצב "כל השיטות").
+   nikud - מגבלות הניקוד מהקלט הגולמי (פלט parseNikud), או null כשהקלט לא מנוקד. */
+function renderModeMatches(box,mode,w,skip,title,showTransform,nikud){
   var winB=mode.before||0, winA=mode.after||0;
+  var st={shownWords:60, shownOcc:10};
   if(mode.kind==='word'){
     var inputNoSpace=w.replace(/ /g,'');
-    var ctx0={input:inputNoSpace,inputG:gval(inputNoSpace),inputM:gmil(inputNoSpace)};
+    var ctx0={input:inputNoSpace,inputG:gval(inputNoSpace),inputM:gmil(inputNoSpace),nikud:nikud};
     if(mode.transform)ctx0.transformed=mode.transform(inputNoSpace);
     var groups={};
     streams.forEach(function(s,bi){
       var vl=verseList[bi];
       for(var i=0;i<s.w.length;i++){
         var ctx=ctx0;
+        ctx0.nword=s.n[i];
         if(winB||winA){
           ctx.before=s.w.slice(Math.max(0,i-winB),i);
           ctx.after=s.w.slice(i+1,i+1+winA);
@@ -103,76 +105,113 @@ function runSearch(){
     });
     var words=Object.keys(groups).sort(function(a,b){return groups[b].count-groups[a].count||a.localeCompare(b,'he');});
     var totOcc=words.reduce(function(n,k){return n+groups[k].count;},0);
-      h+='<div class="card matches"><div class="chead"><span class="cname">התאמות</span><span class="ctag">'+(words.length===1?'מילה אחת':words.length+' מילים שונות')+' · '+totOcc+' מופעים בכל התנ״ך</span></div>';
+    var ctag=(words.length===1?'מילה אחת':words.length+' מילים שונות')+' · '+totOcc+' מופעים בכל התנ״ך';
+    if(mode.usesNikud&&nikud)ctag+=' · מתחשב בניקוד שהוזן';
+    var h='<div class="chead"><span class="cname">'+esc(title)+'</span><span class="ctag">'+ctag+'</span></div>';
+    if(showTransform&&mode.transform)h+='<div class="swapword" style="margin:2px 0 10px"><span class="from">'+esc(inputNoSpace)+' ← </span>'+esc(ctx0.transformed)+'</div>';
     if(!words.length)h+='<div class="nomatch">לא נמצאו התאמות בכל התנ״ך.</div>';
     else{
-      h+='<div class="matchlist" id="mlist"></div><div id="mocc"></div>';
-      if(words.length>shownWords)h+='<button class="moreBtn" id="moreW">הצג עוד מילים ('+(words.length-shownWords)+')</button>';
+      h+='<div class="matchlist" data-mlist></div><div data-mocc></div>';
+      h+='<button class="moreBtn" data-morew hidden></button>';
     }
-    h+='</div>';
-    results.innerHTML=h;
-    renderWordList(words,groups,winB,winA);
-    if(words.length)showOcc(words[0],groups,winB,winA);
-    var mb=document.getElementById('moreW');
-    if(mb)mb.addEventListener('click',function(){shownWords+=120;renderWordList(words,groups,winB,winA);});
+    box.innerHTML=h;
+    if(words.length){
+      var mlist=box.querySelector('[data-mlist]'),mocc=box.querySelector('[data-mocc]'),moreW=box.querySelector('[data-morew]');
+      var paint=function(){
+        var vis=words.slice(0,st.shownWords);
+        mlist.innerHTML=vis.map(function(k){return '<button data-w="'+esc(k)+'">'+esc(k)+'<small>'+groups[k].count+'</small></button>';}).join('');
+        mlist.querySelectorAll('button').forEach(function(b){
+          b.addEventListener('click',function(){show(b.getAttribute('data-w'));});
+        });
+        if(words.length>st.shownWords){moreW.hidden=false;moreW.style.display='';moreW.textContent='הצג עוד מילים ('+(words.length-st.shownWords)+')';}
+        else {moreW.hidden=true;moreW.style.display='none';}
+      };
+      var show=function(key){
+        var g=groups[key];
+        var hh='<div class="occs"><div class="ctag" style="margin-bottom:8px">מופעים של <b>'+esc(key)+'</b> · לחיצה על ״הצג עוד מופעים״ מציגה את כולם</div>';
+        g.locs.slice(0,st.shownOcc).forEach(function(L){
+          var from=Math.max(0,L.i-winB), to=Math.min(streams[L.b].w.length-1,L.i+winA);
+          hh+='<div class="occ">'+renderRange(L.b,from,to,L.i,L.i,null,true)+'</div>';
+        });
+        if(g.locs.length>st.shownOcc)hh+='<button class="moreBtn" data-moreo>הצג עוד מופעים ('+(g.locs.length-st.shownOcc)+')</button>';
+        mocc.innerHTML=hh+'</div>';
+        var mo=mocc.querySelector('[data-moreo]');
+        if(mo)mo.addEventListener('click',function(){st.shownOcc+=50;show(key);});
+      };
+      moreW.addEventListener('click',function(){st.shownWords+=120;paint();});
+      paint();
+      show(words[0]);
+    }
   }else{
-    var skip=+document.getElementById('skipD').value||1;
-    var all=[],tot=0;
+    var all=[];
     streams.forEach(function(s,bi){
       var r=mode.run(bi,w.replace(/ /g,''),skip);
       r.forEach(function(x){all.push({b:bi,i:x.i,span:x.span,marks:x.marks});});
     });
-    tot=all.length;
-    h+='<div class="card matches"><div class="chead"><span class="cname">התאמות</span><span class="ctag">'+tot+' מופעים בכל התנ״ך</span></div>';
+    var tot=all.length;
+    var ctag=tot+' מופעים בכל התנ״ך';
+    if(mode.needsSkip)ctag+=' · מרחק דילוג '+skip;
+    var h='<div class="chead"><span class="cname">'+esc(title)+'</span><span class="ctag">'+ctag+'</span></div>';
     if(!tot)h+='<div class="nomatch">לא נמצאו התאמות בכל התנ״ך.</div>';
-    else h+='<div class="occs" id="socc"></div>';
-    if(tot>shownOcc)h+='<button class="moreBtn" id="moreS">הצג עוד מופעים ('+(tot-shownOcc)+')</button>';
-    h+='</div>';
+    else h+='<div class="occs" data-socc></div><button class="moreBtn" data-mores hidden></button>';
+    box.innerHTML=h;
+    if(tot){
+      var socc=box.querySelector('[data-socc]'),moreS=box.querySelector('[data-mores]');
+      var paintS=function(){
+        var hh='';
+        all.slice(0,st.shownOcc).forEach(function(L){
+          var s=streams[L.b];
+          var from=Math.max(0,L.i-winB), to=Math.min(s.w.length-1,L.i+L.span-1+winA);
+          hh+='<div class="occ">'+renderRange(L.b,from,to,L.i,L.i+L.span-1,L.marks?new Set(L.marks):null,true)+'</div>';
+        });
+        socc.innerHTML=hh;
+        if(tot>st.shownOcc){moreS.hidden=false;moreS.style.display='';moreS.textContent='הצג עוד מופעים ('+(tot-st.shownOcc)+')';}
+        else {moreS.hidden=true;moreS.style.display='none';}
+      };
+      moreS.addEventListener('click',function(){st.shownOcc+=100;paintS();});
+      paintS();
+    }
+  }
+}
+function runSearch(){
+  var w=clean(input.value); curInput=w;
+  document.getElementById('skipWrap').hidden=!(curMode.needsSkip||curMode===ALL);
+  if(w)syncURL(input.value.trim(),curMode);
+  if(!w){document.body.classList.remove('searching');results.innerHTML='';return;}
+  document.body.classList.add('searching');
+  var skip=+document.getElementById('skipD').value||1;
+  /* מגבלות הניקוד נקראות מהקלט הגולמי, לפני שהניקוד מופרד לצורך חיפוש האותיות. */
+  var nikudArr=parseNikud(input.value);
+  var nikud=hasNikudMarks(nikudArr)?nikudArr:null;
+  var h;
+  if(curMode===ALL){
+    h='<div class="queryline">תוצאות עבור <b>'+esc(input.value.trim())+'</b> בכל השיטות</div>';
+    h+=infoCard(ALL,w);
+    if(nikud)h+='<div class="queryline">במילה מדויקת: הניקוד שהוזן מחייב; אות ללא ניקוד אינה מגבילה. שאר השיטות פועלות לפי אותיות בלבד. טעמי המקרא אינם מגבילים.</div>';
     results.innerHTML=h;
-    renderSeqList(all,winB,winA);
-
-    var ms=document.getElementById('moreS');
-    if(ms)ms.addEventListener('click',function(){shownOcc+=100;renderSeqList(all,winB,winA);});
+    MODES.forEach(function(m){
+      var card=document.createElement('div');card.className='card matches';
+      results.appendChild(card);
+      renderModeMatches(card,m,w,skip,m.name,true,nikud);
+    });
+  }else{
+    var mode=curMode;
+    h='<div class="queryline">תוצאות עבור <b>'+esc(input.value.trim())+'</b> במצב <b>'+esc(mode.name)+'</b></div>';
+    h+=infoCard(mode,w);
+    results.innerHTML=h;
+    var card=document.createElement('div');card.className='card matches';
+    results.appendChild(card);
+    renderModeMatches(card,mode,w,skip,'התאמות',false,nikud);
   }
   window.scrollTo({top:0,behavior:'smooth'});
-}
-function renderWordList(words,groups,winB,winA){
-  var box=document.getElementById('mlist');if(!box)return;
-  var vis=words.slice(0,shownWords);
-  box.innerHTML=vis.map(function(k){return '<button data-w="'+esc(k)+'">'+esc(k)+'<small>'+groups[k].count+'</small></button>';}).join('');
-  box.querySelectorAll('button').forEach(function(b){
-    b.addEventListener('click',function(){showOcc(b.getAttribute('data-w'),groups,winB,winA);});
-  });
-}
-function showOcc(key,groups,winB,winA){
-  var g=groups[key],box=document.getElementById('mocc');
-  var h='<div class="occs"><div class="ctag" style="margin-bottom:8px">מופעים של <b>'+esc(key)+'</b> · לחיצה על ״הצג עוד מופעים״ מציגה את כולם</div>';
-  g.locs.slice(0,shownOcc).forEach(function(L){
-    var from=Math.max(0,L.i-winB), to=Math.min(streams[L.b].w.length-1,L.i+winA);
-    h+='<div class="occ">'+renderRange(L.b,from,to,L.i,L.i,null,true)+'</div>';
-  });
-  if(g.locs.length>shownOcc)h+='<button class="moreBtn" id="moreO">הצג עוד מופעים ('+(g.locs.length-shownOcc)+')</button>';
-  box.innerHTML=h+'</div>';
-  var mo=document.getElementById('moreO');
-  if(mo)mo.addEventListener('click',function(){shownOcc+=50;showOcc(key,groups,winB,winA);});
-}
-function renderSeqList(all,winB,winA){
-  var box=document.getElementById('socc');if(!box)return;
-  var h='';
-  all.slice(0,shownOcc).forEach(function(L){
-    var s=streams[L.b];
-    var from=Math.max(0,L.i-winB), to=Math.min(s.w.length-1,L.i+L.span-1+winA);
-    h+='<div class="occ">'+renderRange(L.b,from,to,L.i,L.i+L.span-1,L.marks?new Set(L.marks):null,true)+'</div>';
-  });
-  box.innerHTML=h;
 }
 
 /* ================= בניית הממשק ================= */
 var grid=document.getElementById('modegrid');
 document.getElementById('tagline').textContent='מנוע חיפוש מעל כל התנ״ך · '+MODES.map(function(m){return m.name;}).join(' · ');
-MODES.forEach(function(m,ix){
+SEL.forEach(function(m){
   var b=document.createElement('button');
-  b.textContent=m.name;b.setAttribute('aria-pressed',ix===0);
+  b.textContent=m.name;b.setAttribute('aria-pressed',m===curMode);
   b.addEventListener('click',function(){
     curMode=m;
     grid.querySelectorAll('button').forEach(function(x){x.setAttribute('aria-pressed','false');});
@@ -184,11 +223,11 @@ MODES.forEach(function(m,ix){
 document.getElementById('go').addEventListener('click',runSearch);
 input.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();runSearch();}});
 document.getElementById('skipD').addEventListener('change',runSearch);
-/* קישור ישיר: פתיחת הדף עם #q=...&m=...&d=... משחזר ומריץ את החיפוש */
+/* קישור ישיר: פתיחת הדף עם #q=...&m=...&d=... משחזר ומריץ את החיפוש (m=all הוא "כל השיטות"; q יכול להיות מנוקד) */
 try{
   var hp={};location.hash.replace(/^#/,'').split('&').forEach(function(kv){var p=kv.split('=');if(p[0])hp[p[0]]=decodeURIComponent(p[1]||'');});
-  if(hp.m){var mm=MODES.filter(function(x){return x.id===hp.m;})[0];if(mm){curMode=mm;grid.querySelectorAll('button').forEach(function(x,ix){x.setAttribute('aria-pressed',MODES[ix]===mm);});}}
+  if(hp.m){var mm=SEL.filter(function(x){return x.id===hp.m;})[0];if(mm){curMode=mm;grid.querySelectorAll('button').forEach(function(x,ix){x.setAttribute('aria-pressed',SEL[ix]===mm);});}}
   if(hp.d)document.getElementById('skipD').value=hp.d;
   if(hp.q){input.value=hp.q;runSearch();}
-  else document.getElementById('skipWrap').hidden=!curMode.needsSkip;
+  else document.getElementById('skipWrap').hidden=!(curMode.needsSkip||curMode===ALL);
 }catch(e){}

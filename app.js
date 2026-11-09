@@ -145,12 +145,13 @@ function renderModeMatches(box,mode,w,skip,title,showTransform,nikud){
   }else{
     var all=[];
     streams.forEach(function(s,bi){
-      var r=mode.run(bi,w.replace(/ /g,''),skip);
+      var r=mode.run(bi,mode.keepSpaces?w:w.replace(/ /g,''),skip,nikud);
       r.forEach(function(x){all.push({b:bi,i:x.i,span:x.span,marks:x.marks});});
     });
     var tot=all.length;
     var ctag=tot+' מופעים בכל התנ״ך';
     if(mode.needsSkip)ctag+=' · מרחק דילוג '+skip;
+    if(mode.usesNikud&&nikud)ctag+=' · מתחשב בניקוד שהוזן';
     var h='<div class="chead"><span class="cname">'+esc(title)+'</span><span class="ctag">'+ctag+'</span></div>';
     if(!tot)h+='<div class="nomatch">לא נמצאו התאמות בכל התנ״ך.</div>';
     else h+='<div class="occs" data-socc></div><button class="moreBtn" data-mores hidden></button>';
@@ -187,7 +188,7 @@ function runSearch(){
   if(curMode===ALL){
     h='<div class="queryline">תוצאות עבור <b>'+esc(input.value.trim())+'</b> בכל השיטות</div>';
     h+=infoCard(ALL,w);
-    if(nikud)h+='<div class="queryline">במילה מדויקת: הניקוד שהוזן מחייב; אות ללא ניקוד אינה מגבילה. שאר השיטות פועלות לפי אותיות בלבד. טעמי המקרא אינם מגבילים.</div>';
+    if(nikud)h+='<div class="queryline">במילה מדויקת ובמילים רצופות: הניקוד שהוזן מחייב; אות ללא ניקוד אינה מגבילה. שאר השיטות פועלות לפי אותיות בלבד. טעמי המקרא אינם מגבילים.</div>';
     results.innerHTML=h;
     MODES.forEach(function(m){
       var card=document.createElement('div');card.className='card matches';
